@@ -9,25 +9,10 @@ import os
 
 # ------------ ENV & OPENAI SETUP ------------
 load_dotenv()  # loads OPENAI_API_KEY from .env or Streamlit secrets
-
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # ------------ PAGE CONFIG + HIDE MENU ------------
 st.set_page_config(page_title="DocuChat AI", page_icon=":brain:", layout="wide")
-st.markdown(
-    """
-    <style>
-    [data-testid="stSidebar"][aria-expanded="false"] { 
-        margin-left: 0px;
-    }
-    [data-testid="stSidebar"][aria-expanded="true"]{
-        min-width: 320px;
-        max-width: 320px;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
 hide_st_style = """
     <style>
@@ -38,22 +23,20 @@ hide_st_style = """
 """
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
-# ------------ HEADER ------------
-st.title("🧠 DocuChat AI")
-st.caption("🚀 Powered by OpenAI | Chat with Multiple PDFs")
+# ------------ TOP AREA: TITLE + UPLOAD ------------
+left_col, right_col = st.columns([2, 1])
 
-# ------------ SIDEBAR (UPLOAD + PROCESS) ------------
-with st.sidebar:
-    st.write("SIDEBAR LOADED")  # debug text
-    st.header("📂 Document Center")
-    ...
-with st.sidebar:
-    st.header("📂 Document Center")
+with left_col:
+    st.title("🧠 DocuChat AI")
+    st.caption("🚀 Powered by OpenAI | Chat with Multiple PDFs")
 
+with right_col:
+    st.subheader("📂 Document Center")
     pdf_docs = st.file_uploader(
         "Upload your PDFs",
         type="pdf",
-        accept_multiple_files=True
+        accept_multiple_files=True,
+        label_visibility="collapsed",  # hide label text, keep drop area
     )
 
     if st.button("Processing Documents"):
@@ -78,7 +61,7 @@ with st.sidebar:
                 )
                 chunks = text_splitter.split_text(raw_text)
 
-                # C. Create vector store (needs OPENAI_API_KEY)
+                # C. Create vector store
                 embeddings = OpenAIEmbeddings(
                     model="text-embedding-3-small",
                     openai_api_key=OPENAI_API_KEY,
@@ -92,11 +75,11 @@ with st.sidebar:
         else:
             st.warning("⚠️ Please upload at least one PDF first.")
 
-    st.divider()
-
     if st.button("🗑️ Clear Chat History"):
         st.session_state.messages = []
         st.experimental_rerun()
+
+st.markdown("---")
 
 # ------------ SESSION STATE INIT ------------
 if "messages" not in st.session_state:
@@ -124,7 +107,7 @@ if user_question:
             st.warning("⚠️ Please upload and process your PDFs first!")
     else:
         llm = ChatOpenAI(
-            model="gpt-4.1-mini",        # use any chat model you enabled
+            model="gpt-4.1-mini",
             api_key=OPENAI_API_KEY,
         )  # [web:229]
         qa_chain = ConversationalRetrievalChain.from_llm(
@@ -140,5 +123,3 @@ if user_question:
                 st.write(answer)
 
         st.session_state.messages.append({"role": "assistant", "content": answer})
-
-
