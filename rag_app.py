@@ -10,9 +10,11 @@ from langchain.chains import ConversationalRetrievalChain
 
 
 def get_openai_api_key() -> str:
-    # Works locally with .env and on Streamlit Cloud with secrets.
     load_dotenv()
-    return st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
+    try:
+        return st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+    except Exception:
+        return os.getenv("OPENAI_API_KEY", "")
 
 
 def extract_text_from_pdfs(pdf_files) -> str:
@@ -42,12 +44,11 @@ def build_vectorstore(raw_text: str) -> FAISS:
 
     embeddings = OpenAIEmbeddings(
         model="text-embedding-3-small",
-        openai_api_key=get_openai_api_key(),
+        api_key=get_openai_api_key(),
     )
     return FAISS.from_texts(texts=chunks, embedding=embeddings)
 
 
-# ------------ PAGE CONFIG + HIDE MENU ------------
 st.set_page_config(page_title="DocuChat AI", page_icon="🧠", layout="wide")
 
 st.markdown(
@@ -61,11 +62,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ------------ SESSION STATE INIT ------------
 st.session_state.setdefault("messages", [])
 st.session_state.setdefault("vectorstore", None)
 
-# ------------ TOP AREA: TITLE + UPLOAD ------------
 left_col, right_col = st.columns([2, 1])
 
 with left_col:
@@ -119,13 +118,23 @@ with right_col:
 
 st.markdown("---")
 
-# ------------ SHOW CHAT HISTORY ------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-# ------------ CHAT INPUT / QA ------------
 user_question = st.chat_input("Ask a question about your documents...")
+
+def build_history(messages):
+    history = []
+    last_user = None
+    for m in messages:
+        if m["role"] == "user":
+            last_user = m["content"]
+        elif m["role"] == "assistant" and last_user is not None:
+            history.append((last_user, m["content"]))
+            last_user = None
+    return history
+
 
 if user_question:
     st.session_state.messages.append({"role": "user", "content": user_question})
@@ -141,10 +150,9 @@ if user_question:
             with st.chat_message("assistant"):
                 st.error("OPENAI_API_KEY is missing.")
         else:
-            # IMPORTANT: use openai_api_key (not api_key) for common langchain_openai versions
             llm = ChatOpenAI(
-                model="gpt-4.1-mini",
-                openai_api_key=api_key,
+                model="gpt-4o-mini",
+                api_key=api_key,
                 temperature=0,
             )
 
@@ -156,14 +164,8 @@ if user_question:
 
             with st.chat_message("assistant"):
                 with st.spinner("Thinking..."):
-                    # Use stored history (as tuples) instead of always passing []
-                    history = [
-                        (m["content"], st.session_state.messages[i + 1]["content"])
-                        for i, m in enumerate(st.session_state.messages[:-1])
-                        if m["role"] == "user" and i + 1 < len(st.session_state.messages)
-                        and st.session_state.messages[i + 1]["role"] == "assistant"
-                    ]
-                    result = qa_chain({"question": user_question, "chat_history": history})
+                    history = build_history(st.session_state.messages[:-1])
+                    result = qa_chain.invoke({"question": user_question, "chat_history": history})
                     answer = result.get("answer", "")
                     st.write(answer)
 
