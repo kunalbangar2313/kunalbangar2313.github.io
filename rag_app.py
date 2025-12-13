@@ -1,32 +1,28 @@
 import os
 import streamlit as st
-from dotenv import load_dotenv
-from PyPDF2 import PdfReader
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from pypdf import PdfReader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 
+# -------------------- Page Config --------------------
+st.set_page_config(page_title="DocuChat AI", page_icon="📄", layout="wide")
 
-def get_openai_api_key() -> str:
-    load_dotenv()
-    try:
-        return st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
-    except Exception:
-        return os.getenv("OPENAI_API_KEY", "")
+# -------------------- Secrets / Keys --------------------
+# Prefer Streamlit secrets, fallback to environment variable
+OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
 
-
+# -------------------- Helpers --------------------
 def extract_text_from_pdfs(pdf_files) -> str:
-    raw_text = ""
-    for pdf in pdf_files:
-        reader = PdfReader(pdf)
+    text = ""
+    for f in pdf_files:
+        reader = PdfReader(f)
         for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                raw_text += text + "\n"
-    return raw_text
-
+            page_text = page.extract_text() or ""
+            text += page_text + "\n"
+    return text
 
 def build_vectorstore(raw_text: str) -> FAISS:
     splitter = RecursiveCharacterTextSplitter(
@@ -36,137 +32,104 @@ def build_vectorstore(raw_text: str) -> FAISS:
     )
     chunks = splitter.split_text(raw_text)
 
-    if not chunks:
-        raise ValueError(
-            "No extractable text found in the uploaded PDFs. "
-            "If these are scanned PDFs (images), run OCR first."
-        )
-
     embeddings = OpenAIEmbeddings(
         model="text-embedding-3-small",
-        api_key=get_openai_api_key(),
+        api_key=OPENAI_API_KEY,
     )
-    return FAISS.from_texts(texts=chunks, embedding=embeddings)
+    vs = FAISS.from_texts(chunks, embedding=embeddings)
+    return vs
 
+def build_chain(vectorstore: FAISS):
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        api_key=OPENAI_API_KEY,
+        temperature=0.2,
+    )
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+    chain = ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=retriever,
+        return_source_documents=False,
+    )
+    return chain
 
-st.set_page_config(page_title="DocuChat AI", page_icon="🧠", layout="wide")
+# -------------------- UI --------------------
+st.title("DocuChat AI")
+st.write("Upload PDFs, build a local FAISS index, and chat with your documents.")
 
-st.markdown(
-    """
-    <style>
-      #MainMenu {visibility: hidden;}
-      footer {visibility: hidden;}
-      header {visibility: hidden;}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.session_state.setdefault("messages", [])
-st.session_state.setdefault("vectorstore", None)
-
-left_col, right_col = st.columns([2, 1])
-
-with left_col:
-    st.title("🧠 DocuChat AI")
-    st.caption("Powered by OpenAI | Chat with Multiple PDFs")
-
-with right_col:
-    st.subheader("📂 Document Center")
-
+with st.sidebar:
+    st.header("1) Upload PDFs")
     pdf_docs = st.file_uploader(
-        "Upload your PDFs",
-        type="pdf",
+        "Upload one or more PDF files",
+        type=["pdf"],
         accept_multiple_files=True,
-        label_visibility="collapsed",
     )
 
-    col_a, col_b = st.columns(2)
+    st.header("2) Build knowledge base")
+    build_btn = st.button("Process Documents", type="primary")
 
-    with col_a:
-        process_clicked = st.button("Process Documents", use_container_width=True)
+    st.divider()
+    st.caption("Set the API key in Streamlit Cloud → App → Settings → Secrets:")
+    st.code('OPENAI_API_KEY="..."', language="toml")
 
-    with col_b:
-        clear_clicked = st.button("Clear Chat", use_container_width=True)
+# Session state init
+if "vectorstore" not in st.session_state:
+    st.session_state.vectorstore = None
+if "chain" not in st.session_state:
+    st.session_state.chain = None
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    if clear_clicked:
-        st.session_state.messages = []
-        st.session_state.vectorstore = None
-        st.rerun()
+# Validate key early
+if not OPENAI_API_KEY:
+    st.warning("OPENAI_API_KEY not found. Add it in Streamlit Secrets to use this app.")
 
-    if process_clicked:
-        api_key = get_openai_api_key()
-        if not api_key:
-            st.error("OPENAI_API_KEY is missing. Add it to Streamlit secrets or your environment.")
-        elif not pdf_docs:
-            st.warning("Please upload at least one PDF first.")
-        else:
-            try:
-                with st.spinner("Processing... This may take a moment."):
-                    raw_text = extract_text_from_pdfs(pdf_docs)
-                    if not raw_text.strip():
-                        st.error(
-                            "Could not extract any text from the PDFs. "
-                            "If they are scanned/image PDFs, you need OCR."
-                        )
-                    else:
-                        st.session_state.vectorstore = build_vectorstore(raw_text)
-                        st.session_state.messages = []
-                        st.success("✅ Documents processed!")
-            except Exception as e:
-                st.exception(e)
-
-st.markdown("---")
-
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.write(msg["content"])
-
-user_question = st.chat_input("Ask a question about your documents...")
-
-def build_history(messages):
-    history = []
-    last_user = None
-    for m in messages:
-        if m["role"] == "user":
-            last_user = m["content"]
-        elif m["role"] == "assistant" and last_user is not None:
-            history.append((last_user, m["content"]))
-            last_user = None
-    return history
-
-
-if user_question:
-    st.session_state.messages.append({"role": "user", "content": user_question})
-    with st.chat_message("user"):
-        st.write(user_question)
-
-    if st.session_state.vectorstore is None:
-        with st.chat_message("assistant"):
-            st.warning("Please upload and process your PDFs first.")
+# Build vectorstore + chain
+if build_btn:
+    if not pdf_docs:
+        st.warning("Please upload at least one PDF first.")
+    elif not OPENAI_API_KEY:
+        st.error("Missing OPENAI_API_KEY. Add it to Streamlit Secrets.")
     else:
-        api_key = get_openai_api_key()
-        if not api_key:
-            with st.chat_message("assistant"):
-                st.error("OPENAI_API_KEY is missing.")
-        else:
-            llm = ChatOpenAI(
-                model="gpt-4o-mini",
-                api_key=api_key,
-                temperature=0,
-            )
+        with st.spinner("Processing PDFs and building vector index..."):
+            raw_text = extract_text_from_pdfs(pdf_docs)
+            st.session_state.vectorstore = build_vectorstore(raw_text)
+            st.session_state.chain = build_chain(st.session_state.vectorstore)
+            st.session_state.messages = []
+        st.success("Documents processed! You can now chat.")
 
-            qa_chain = ConversationalRetrievalChain.from_llm(
-                llm=llm,
-                retriever=st.session_state.vectorstore.as_retriever(search_kwargs={"k": 4}),
-                return_source_documents=False,
-            )
+# Chat UI
+st.subheader("Chat")
 
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    history = build_history(st.session_state.messages[:-1])
-                    result = qa_chain.invoke({"question": user_question, "chat_history": history})
-                    answer = result.get("answer", "")
-                    st.write(answer)
+# Render previous chat
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
-            st.session_state.messages.append({"role": "assistant", "content": answer})
+prompt = st.chat_input("Ask something about your PDFs...")
+if prompt:
+    if not st.session_state.chain:
+        st.info("Process your documents first (left sidebar).")
+    else:
+        # show user message
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # prepare history in (human, ai) tuples
+        history = []
+        user_buf = None
+        for m in st.session_state.messages:
+            if m["role"] == "user":
+                user_buf = m["content"]
+            elif m["role"] == "assistant" and user_buf is not None:
+                history.append((user_buf, m["content"]))
+                user_buf = None
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                result = st.session_state.chain({"question": prompt, "chat_history": history})
+                answer = result["answer"]
+                st.markdown(answer)
+
+        st.session_state.messages.append({"role": "assistant", "content": answer})
