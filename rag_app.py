@@ -12,7 +12,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Page Config ---
-st.set_page_config(page_title="DocuChat AI", page_icon="🧠", layout="wide")
+st.set_page_config# --- Hide Streamlit Menu and Footer ---
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
+(page_title="DocuChat AI", page_icon="🧠", layout="wide")
 
 # --- Custom CSS for UI Polish ---
 st.markdown("""
@@ -140,3 +149,4 @@ if user_question:
         # If no documents uploaded yet
         with st.chat_message("assistant"):
             st.warning("⚠️ Please upload and process a PDF document first!")
+
