@@ -14,6 +14,20 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # ------------ PAGE CONFIG + HIDE MENU ------------
 st.set_page_config(page_title="DocuChat AI", page_icon=":brain:", layout="wide")
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebar"][aria-expanded="false"] { 
+        margin-left: 0px;
+    }
+    [data-testid="stSidebar"][aria-expanded="true"]{
+        min-width: 320px;
+        max-width: 320px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 hide_st_style = """
     <style>
@@ -126,4 +140,5 @@ if user_question:
                 st.write(answer)
 
         st.session_state.messages.append({"role": "assistant", "content": answer})
+
 
