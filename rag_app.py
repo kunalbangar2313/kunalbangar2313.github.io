@@ -30,6 +30,10 @@ st.caption("🚀 Powered by OpenAI | Chat with Multiple PDFs")
 
 # ------------ SIDEBAR (UPLOAD + PROCESS) ------------
 with st.sidebar:
+    st.write("SIDEBAR LOADED")  # debug text
+    st.header("📂 Document Center")
+    ...
+with st.sidebar:
     st.header("📂 Document Center")
 
     pdf_docs = st.file_uploader(
@@ -122,3 +126,4 @@ if user_question:
                 st.write(answer)
 
         st.session_state.messages.append({"role": "assistant", "content": answer})
+
