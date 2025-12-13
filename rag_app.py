@@ -64,7 +64,8 @@ with st.sidebar:
                 chunks = text_splitter.split_text(raw_text)
 
                 # C. Create vector store
-                embeddings = OpenAIEmbeddings()
+                embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+
                 vectorstore = FAISS.from_texts(texts=chunks, embedding=embeddings)
 
                 # D. Save to session state
@@ -119,3 +120,4 @@ if user_question:
                 st.write(answer)
 
         st.session_state.messages.append({"role": "assistant", "content": answer})
+
