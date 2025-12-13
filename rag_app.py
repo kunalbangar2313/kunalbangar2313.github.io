@@ -20,8 +20,8 @@ hide_st_style = """
             header {visibility: hidden;}
             </style>
             """
-st.markdown(hide_st_style, unsafe_allow_html=True)
-(page_title="DocuChat AI", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="DocuChat AI", page_icon=":brain:", layout="wide")
+
 
 # --- Custom CSS for UI Polish ---
 st.markdown("""
@@ -149,4 +149,5 @@ if user_question:
         # If no documents uploaded yet
         with st.chat_message("assistant"):
             st.warning("⚠️ Please upload and process a PDF document first!")
+
 
