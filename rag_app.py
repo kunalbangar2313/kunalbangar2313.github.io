@@ -61,7 +61,8 @@ def read_uploaded_files(files: list) -> list[Document]:
 def compute_docs_fingerprint(docs: list[Document]) -> str:
     """Compute a stable hash of documents based on content and metadata."""
     content_parts = []
-    for doc in sorted(docs, key=lambda d: d.metadata.get("source", "")):
+    # Sort by source and content to ensure stable ordering
+    for doc in sorted(docs, key=lambda d: (d.metadata.get("source", ""), d.page_content)):
         content_parts.append(doc.page_content)
         content_parts.append(str(sorted(doc.metadata.items())))
     
