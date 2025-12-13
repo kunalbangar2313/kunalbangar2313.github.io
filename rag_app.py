@@ -11,18 +11,17 @@ from langchain.chains import ConversationalRetrievalChain
 st.set_page_config(page_title="DocuChat AI", page_icon="📄", layout="wide")
 
 # -------------------- Secrets / Keys --------------------
-# Prefer Streamlit secrets, fallback to environment variable
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
 
 # -------------------- Helpers --------------------
 def extract_text_from_pdfs(pdf_files) -> str:
-    text = ""
+    text_parts = []
     for f in pdf_files:
         reader = PdfReader(f)
         for page in reader.pages:
-            page_text = page.extract_text() or ""
-            text += page_text + "\n"
-    return text
+            text_parts.append(page.extract_text() or "")
+    return "\n".join(text_parts)
+
 
 def build_vectorstore(raw_text: str) -> FAISS:
     splitter = RecursiveCharacterTextSplitter(
@@ -36,8 +35,8 @@ def build_vectorstore(raw_text: str) -> FAISS:
         model="text-embedding-3-small",
         api_key=OPENAI_API_KEY,
     )
-    vs = FAISS.from_texts(chunks, embedding=embeddings)
-    return vs
+    return FAISS.from_texts(chunks, embedding=embeddings)
+
 
 def build_chain(vectorstore: FAISS):
     llm = ChatOpenAI(
@@ -45,6 +44,7 @@ def build_chain(vectorstore: FAISS):
         api_key=OPENAI_API_KEY,
         temperature=0.2,
     )
+
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
     chain = ConversationalRetrievalChain.from_llm(
         llm=llm,
@@ -52,6 +52,7 @@ def build_chain(vectorstore: FAISS):
         return_source_documents=False,
     )
     return chain
+
 
 # -------------------- UI --------------------
 st.title("DocuChat AI")
@@ -116,19 +117,21 @@ if prompt:
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # prepare history in (human, ai) tuples
+        # Convert message list into (human, ai) tuples expected by ConversationalRetrievalChain
         history = []
-        user_buf = None
+        last_user = None
         for m in st.session_state.messages:
             if m["role"] == "user":
-                user_buf = m["content"]
-            elif m["role"] == "assistant" and user_buf is not None:
-                history.append((user_buf, m["content"]))
-                user_buf = None
+                last_user = m["content"]
+            elif m["role"] == "assistant" and last_user is not None:
+                history.append((last_user, m["content"]))
+                last_user = None
 
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                result = st.session_state.chain({"question": prompt, "chat_history": history})
+                result = st.session_state.chain(
+                    {"question": prompt, "chat_history": history}
+                )
                 answer = result["answer"]
                 st.markdown(answer)
 
