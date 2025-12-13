@@ -5,12 +5,17 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.vectorstores import FAISS
 from langchain.chains import ConversationalRetrievalChain
 from dotenv import load_dotenv
+import openai
 import os
 
-# Load environment variables (for OPENAI_API_KEY)
-load_dotenv()
+# ------------ ENV & OPENAI SETUP ------------
+load_dotenv()  # loads OPENAI_API_KEY from .env or Streamlit secrets
 
-# ---------------- PAGE CONFIG & HIDE MENU ----------------
+# Make sure OpenAI key is visible to langchain / embeddings
+openai.api_key = os.getenv("OPENAI_API_KEY", "")
+os.environ["OPENAI_API_KEY"] = openai.api_key
+
+# ------------ PAGE CONFIG + HIDE MENU ------------
 st.set_page_config(page_title="DocuChat AI", page_icon=":brain:", layout="wide")
 
 hide_st_style = """
@@ -22,22 +27,24 @@ hide_st_style = """
 """
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
-# ---------------- HEADER ----------------
+# ------------ HEADER ------------
 st.title("🧠 DocuChat AI")
 st.caption("🚀 Powered by OpenAI | Chat with Multiple PDFs")
 
-# ---------------- SIDEBAR ----------------
+# ------------ SIDEBAR ------------
 with st.sidebar:
     st.header("📂 Document Center")
 
     pdf_docs = st.file_uploader(
         "Upload your PDFs",
-        accept_multiple_files=True,
-        type="pdf"
+        type="pdf",
+        accept_multiple_files=True
     )
 
     if st.button("Processing Documents"):
-        if pdf_docs:
+        if not openai.api_key:
+            st.error("OPENAI_API_KEY is missing. Please add it in Streamlit secrets.")
+        elif pdf_docs:
             with st.spinner("Processing... This may take a moment."):
                 # A. Extract text from all PDFs
                 raw_text = ""
@@ -73,19 +80,19 @@ with st.sidebar:
         st.session_state.messages = []
         st.experimental_rerun()
 
-# ---------------- INIT SESSION STATE ----------------
+# ------------ SESSION STATE INIT ------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 if "vectorstore" not in st.session_state:
     st.session_state.vectorstore = None
 
-# ---------------- SHOW CHAT HISTORY ----------------
+# ------------ SHOW CHAT HISTORY ------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-# ---------------- CHAT INPUT ----------------
+# ------------ CHAT INPUT ------------
 user_question = st.chat_input("Ask a question about your documents...")
 
 if user_question:
@@ -98,7 +105,6 @@ if user_question:
         with st.chat_message("assistant"):
             st.warning("⚠️ Please upload and process your PDFs first!")
     else:
-        # Build QA chain
         llm = ChatOpenAI()
         qa_chain = ConversationalRetrievalChain.from_llm(
             llm=llm,
