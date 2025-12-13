@@ -66,7 +66,16 @@ with st.sidebar:
                 chunks = text_splitter.split_text(raw_text)
 
                 # C. Create vector store
-                embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+                from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+import os
+
+# ...
+
+embeddings = OpenAIEmbeddings(
+    model="text-embedding-3-small",
+    openai_api_key=os.getenv("OPENAI_API_KEY", "")
+)
+(model="text-embedding-3-small")
 
                 vectorstore = FAISS.from_texts(texts=chunks, embedding=embeddings)
 
@@ -122,5 +131,6 @@ if user_question:
                 st.write(answer)
 
         st.session_state.messages.append({"role": "assistant", "content": answer})
+
 
 
