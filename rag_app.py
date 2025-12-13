@@ -1,41 +1,80 @@
 import os
 import streamlit as st
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 
 
-def build_vectorstore(raw_text: str, api_key: str):
-    """
-    Build a FAISS vectorstore from raw text using OpenAI embeddings.
-    """
+APP_TITLE = "RAG App (FAISS + OpenAI)"
+
+
+def get_api_key() -> str:
+    # Prefer Streamlit secrets, then env var, then UI input.
+    key_from_secrets = ""
+    try:
+        key_from_secrets = st.secrets.get("OPENAI_API_KEY", "")
+    except Exception:
+        key_from_secrets = ""
+
+    key_from_env = os.getenv("OPENAI_API_KEY", "")
+
+    key_input = st.text_input("OpenAI API Key", type="password", placeholder="sk-...")
+
+    return (key_input or key_from_secrets or key_from_env or "").strip()
+
+
+def read_uploaded_files(files: list) -> list[Document]:
+    docs: list[Document] = []
+    for f in files:
+        name = f.name
+        suffix = name.lower().split(".")[-1] if "." in name else ""
+
+        if suffix in ("txt", "md"):
+            text = f.read().decode("utf-8", errors="ignore")
+            if text.strip():
+                docs.append(Document(page_content=text, metadata={"source": name}))
+
+        elif suffix == "pdf":
+            from pypdf import PdfReader
+
+            reader = PdfReader(f)
+            pages = []
+            for page in reader.pages:
+                page_text = page.extract_text() or ""
+                if page_text.strip():
+                    pages.append(page_text)
+
+            text = "\n\n".join(pages)
+            if text.strip():
+                docs.append(Document(page_content=text, metadata={"source": name}))
+
+        else:
+            st.warning(f"Skipped unsupported file: {name} (supported: .txt, .md, .pdf)")
+
+    return docs
+
+
+def build_vectorstore(docs: list[Document], api_key: str) -> FAISS:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=150,
         separators=["\n\n", "\n", " ", ""],
     )
-    docs = splitter.create_documents([raw_text])
+    chunks = splitter.split_documents(docs)
 
-    # NOTE: This uses the modern openai-python client under the hood.
-    # Do NOT pass proxies here; keep deps aligned in requirements.txt.
     embeddings = OpenAIEmbeddings(
         api_key=api_key,
         model="text-embedding-3-small",
     )
-
-    vectorstore = FAISS.from_documents(docs, embeddings)
-    return vectorstore
+    return FAISS.from_documents(chunks, embeddings)
 
 
-def answer_question(vectorstore, question: str, api_key: str) -> str:
-    """
-    Retrieve relevant chunks and answer with a chat model.
-    """
+def answer_question(vectorstore: FAISS, question: str, api_key: str) -> str:
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
     docs = retriever.get_relevant_documents(question)
-
     context = "\n\n---\n\n".join(d.page_content for d in docs)
 
     llm = ChatOpenAI(
@@ -49,7 +88,7 @@ def answer_question(vectorstore, question: str, api_key: str) -> str:
             (
                 "system",
                 "You are a helpful assistant. Answer using ONLY the provided context. "
-                "If the answer is not in the context, say: 'I don't know based on the provided text.'",
+                "If the answer is not in the context, say: 'I don't know based on the provided documents.'",
             ),
             ("user", "Context:\n{context}\n\nQuestion:\n{question}"),
         ]
@@ -58,29 +97,42 @@ def answer_question(vectorstore, question: str, api_key: str) -> str:
     return (prompt | llm).invoke({"context": context, "question": question}).content
 
 
+
 def main():
-    st.set_page_config(page_title="RAG App", layout="wide")
-    st.title("RAG App (FAISS + OpenAI Embeddings)")
+    st.set_page_config(page_title=APP_TITLE, layout="wide")
+    st.title(APP_TITLE)
 
-    # API key: prefer input, fallback to env var
-    api_key = st.text_input("OpenAI API Key", type="password")
+    api_key = get_api_key()
     if not api_key:
-        api_key = os.getenv("OPENAI_API_KEY", "")
-
-    if not api_key:
-        st.info("Enter your OpenAI API key to continue (or set OPENAI_API_KEY).")
+        st.info("Add your OpenAI API key (Streamlit secrets/env/UI) to continue.")
         st.stop()
 
-    st.subheader("Build Knowledge Base")
-    raw_text = st.text_area("Paste your text here", height=260, placeholder="Paste your documents / notes here...")
+    st.subheader("1) Upload documents")
+    files = st.file_uploader(
+        "Upload .txt, .md, or .pdf files",
+        type=["txt", "md", "pdf"],
+        accept_multiple_files=True,
+    )
 
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        if st.button("Build / Rebuild Vectorstore", type="primary", disabled=not raw_text.strip()):
-            with st.spinner("Building vectorstore..."):
-                st.session_state.vectorstore = build_vectorstore(raw_text, api_key)
-            st.success("Vectorstore built and saved in session.")
+        if st.button("Build / Rebuild Vectorstore", type="primary", disabled=not files):
+            with st.spinner("Reading files..."):
+                docs = read_uploaded_files(files)
+
+            if not docs:
+                st.error("No text could be extracted from the uploaded files.")
+                st.stop()
+
+            with st.spinner("Building vectorstore (embeddings + FAISS)..."):
+                try:
+                    st.session_state.vectorstore = build_vectorstore(docs, api_key)
+                except Exception as e:
+                    st.exception(e)
+                    st.stop()
+
+            st.success("Vectorstore built.")
 
     with col2:
         if "vectorstore" in st.session_state:
@@ -90,12 +142,17 @@ def main():
 
     st.divider()
 
-    st.subheader("Ask Questions")
-    question = st.text_input("Your question", placeholder="Ask something about the pasted text...")
+    st.subheader("2) Ask questions")
+    question = st.text_input("Question", placeholder="Ask something about your uploaded documents...")
 
     if st.button("Answer", disabled=("vectorstore" not in st.session_state) or (not question.strip())):
         with st.spinner("Retrieving & generating answer..."):
-            response = answer_question(st.session_state.vectorstore, question, api_key)
+            try:
+                response = answer_question(st.session_state.vectorstore, question, api_key)
+            except Exception as e:
+                st.exception(e)
+                st.stop()
+
         st.markdown("### Answer")
         st.write(response)
 
