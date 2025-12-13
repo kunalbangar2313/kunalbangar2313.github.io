@@ -24,14 +24,15 @@ export OPENAI_API_KEY="sk-..."
 streamlit run rag_app.py
 ```
 
-#### Using Local Embeddings (No OpenAI API Key Required)
-To avoid OpenAI quota exhaustion or run completely offline:
+#### Using Local Embeddings (Reduces OpenAI Costs)
+To avoid OpenAI embedding quota exhaustion:
 ```bash
 export USE_LOCAL_EMBEDDINGS=1
+export OPENAI_API_KEY="sk-..."
 streamlit run rag_app.py
 ```
 
-This uses HuggingFace's `sentence-transformers/all-MiniLM-L6-v2` model for embeddings instead of OpenAI.
+This uses HuggingFace's `sentence-transformers/all-MiniLM-L6-v2` model for embeddings instead of OpenAI, significantly reducing API costs. Note that an OpenAI API key is still required for the LLM (ChatGPT) to answer questions.
 
 ### Caching
 The app automatically caches vectorstores in `./.vectorstore/` directory based on document content fingerprints. If you upload the same documents again, the cached vectorstore will be loaded instantly without re-embedding.

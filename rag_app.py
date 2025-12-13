@@ -99,6 +99,8 @@ def build_vectorstore(docs: list[Document], api_key: str) -> FAISS:
     if os.path.exists(cache_dir):
         try:
             embeddings = get_embeddings(api_key)
+            # Note: allow_dangerous_deserialization is required for FAISS but poses security risk
+            # Only use this with trusted cache directories you control locally
             vectorstore = FAISS.load_local(
                 cache_dir,
                 embeddings,
@@ -157,12 +159,16 @@ def main():
     use_local = os.getenv("USE_LOCAL_EMBEDDINGS", "").strip().lower() in ("1", "true", "yes")
     
     api_key = get_api_key()
-    if not api_key and not use_local:
-        st.info("Add your OpenAI API key (Streamlit secrets/env/UI) to continue, or set USE_LOCAL_EMBEDDINGS=1 to use local embeddings.")
+    # Note: API key is still required for ChatOpenAI LLM, even with local embeddings
+    if not api_key:
+        if use_local:
+            st.info("Using local embeddings, but OpenAI API key is still required for the LLM (question answering). Add your key via Streamlit secrets/env/UI.")
+        else:
+            st.info("Add your OpenAI API key (Streamlit secrets/env/UI) to continue, or set USE_LOCAL_EMBEDDINGS=1 to use local embeddings.")
         st.stop()
     
     if use_local:
-        st.info("🏠 Using local embeddings (HuggingFace sentence-transformers)")
+        st.info("🏠 Using local embeddings for document vectorization (saves OpenAI embedding costs)")
 
     st.subheader("1) Upload documents")
     files = st.file_uploader(
