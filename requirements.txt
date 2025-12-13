@@ -14,3 +14,6 @@ httpx==0.27.2
 anyio==4.6.2.post1
 
 tiktoken>=0.7,<1
+
+# Optional: for local embeddings fallback (USE_LOCAL_EMBEDDINGS=1)
+sentence-transformers>=2.2.0

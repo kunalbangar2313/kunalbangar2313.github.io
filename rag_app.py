@@ -1,4 +1,5 @@
 import os
+import hashlib
 import streamlit as st
 
 from langchain_community.vectorstores import FAISS
@@ -57,6 +58,31 @@ def read_uploaded_files(files: list) -> list[Document]:
     return docs
 
 
+def compute_docs_fingerprint(docs: list[Document]) -> str:
+    """Compute a stable hash of documents based on content and metadata."""
+    content_parts = []
+    for doc in sorted(docs, key=lambda d: d.metadata.get("source", "")):
+        content_parts.append(doc.page_content)
+        content_parts.append(str(sorted(doc.metadata.items())))
+    
+    combined = "\n".join(content_parts)
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
+
+
+def get_embeddings(api_key: str = ""):
+    """Get embeddings model based on environment configuration."""
+    use_local = os.getenv("USE_LOCAL_EMBEDDINGS", "").strip().lower() in ("1", "true", "yes")
+    
+    if use_local:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    else:
+        return OpenAIEmbeddings(
+            api_key=api_key,
+            model="text-embedding-3-small",
+        )
+
+
 def build_vectorstore(docs: list[Document], api_key: str) -> FAISS:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
@@ -65,11 +91,37 @@ def build_vectorstore(docs: list[Document], api_key: str) -> FAISS:
     )
     chunks = splitter.split_documents(docs)
 
-    embeddings = OpenAIEmbeddings(
-        api_key=api_key,
-        model="text-embedding-3-small",
-    )
-    return FAISS.from_documents(chunks, embeddings)
+    # Compute fingerprint for caching
+    fingerprint = compute_docs_fingerprint(docs)
+    cache_dir = os.path.join(".vectorstore", fingerprint)
+    
+    # Try to load from cache
+    if os.path.exists(cache_dir):
+        try:
+            embeddings = get_embeddings(api_key)
+            vectorstore = FAISS.load_local(
+                cache_dir,
+                embeddings,
+                allow_dangerous_deserialization=True
+            )
+            st.info(f"✓ Loaded vectorstore from cache: {cache_dir}")
+            return vectorstore
+        except Exception as e:
+            st.warning(f"Cache load failed, rebuilding: {e}")
+    
+    # Build fresh vectorstore
+    embeddings = get_embeddings(api_key)
+    vectorstore = FAISS.from_documents(chunks, embeddings)
+    
+    # Save to cache
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        vectorstore.save_local(cache_dir)
+        st.info(f"✓ Saved vectorstore to cache: {cache_dir}")
+    except Exception as e:
+        st.warning(f"Failed to save cache (will rebuild next time): {e}")
+    
+    return vectorstore
 
 
 def answer_question(vectorstore: FAISS, question: str, api_key: str) -> str:
@@ -102,10 +154,15 @@ def main():
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     st.title(APP_TITLE)
 
+    use_local = os.getenv("USE_LOCAL_EMBEDDINGS", "").strip().lower() in ("1", "true", "yes")
+    
     api_key = get_api_key()
-    if not api_key:
-        st.info("Add your OpenAI API key (Streamlit secrets/env/UI) to continue.")
+    if not api_key and not use_local:
+        st.info("Add your OpenAI API key (Streamlit secrets/env/UI) to continue, or set USE_LOCAL_EMBEDDINGS=1 to use local embeddings.")
         st.stop()
+    
+    if use_local:
+        st.info("🏠 Using local embeddings (HuggingFace sentence-transformers)")
 
     st.subheader("1) Upload documents")
     files = st.file_uploader(
